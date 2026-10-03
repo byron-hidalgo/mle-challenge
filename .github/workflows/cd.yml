@@ -1,0 +1,45 @@
+# CD: cada push a main construye las 3 imágenes, las sube a Artifact Registry
+# y actualiza los jobs y la API en Cloud Run. Solo cambia la imagen, las variables
+# de entorno y permisos quedan como los dejó infra/bootstrap.sh.
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  REPO: mle-challenge
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Login en GCP con la llave de la cuenta de servicio (guardada como secret, nunca en el repo)
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Login de docker en Artifact Registry
+        run: gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+
+      # Cada imagen se etiqueta con el commit, así sabemos qué versión está desplegada
+      - name: Build y push
+        run: |
+          BASE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO
+          for name in api training serving; do
+            docker build -f Dockerfile.$name -t $BASE/$name:${{ github.sha }} .
+            docker push $BASE/$name:${{ github.sha }}
+          done
+
+      - name: Actualizar Cloud Run
+        run: |
+          BASE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO
+          gcloud run jobs update delay-training --image $BASE/training:${{ github.sha }} --region $REGION
+          gcloud run jobs update delay-serving --image $BASE/serving:${{ github.sha }} --region $REGION
+          gcloud run services update mle-api --image $BASE/api:${{ github.sha }} --region $REGION
