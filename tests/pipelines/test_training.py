@@ -6,7 +6,7 @@ import pandas as pd
 
 from challenge.config import Settings
 from challenge.training import main
-
+from challenge.model import FEATURES_COLS
 
 def _fake_settings(deployment_mode: str = "local") -> Settings:
     return Settings(
